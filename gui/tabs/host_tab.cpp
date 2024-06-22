@@ -68,9 +68,9 @@ namespace HostTab {
 						if (State.assignedRolesPlayer[index] == nullptr)
 							continue;
 
-						auto outfit = GetPlayerOutfit(playerData);
+						app::NetworkedPlayerInfo_PlayerOutfit* outfit = GetPlayerOutfit(playerData);
 						if (outfit == NULL) continue;
-						const std::string& playerName = convert_from_string(outfit->fields.PlayerName);
+						const std::string& playerName = convert_from_string(NetworkedPlayerInfo_get_PlayerName(playerData, nullptr));
 						//player colors in host tab by gdjkhp (https://github.com/GDjkhp/AmongUsMenu/commit/53b017183bac503c546f198e2bc03539a338462c)
 						if (CustomListBoxInt(playerName.c_str(), reinterpret_cast<int*>(&State.assignedRoles[index]), ROLE_NAMES, 80 * State.dpiScale, AmongUsColorToImVec4(GetPlayerColor(outfit->fields.ColorId))))
 						{
@@ -198,7 +198,7 @@ namespace HostTab {
 					}
 				}
 
-				CustomListBoxInt(" ­", &State.HostSelectedColorId, HOSTCOLORS, 85.0f * State.dpiScale);
+				CustomListBoxInt(" ï¿½", &State.HostSelectedColorId, HOSTCOLORS, 85.0f * State.dpiScale);
 
 				if (ToggleButton("Force Color for Everyone", &State.ForceColorForEveryone)) {
 					State.Save();
@@ -211,17 +211,48 @@ namespace HostTab {
 					State.Save();
 				}
 
-				if (IsHost() && IsInGame() && GetPlayerData(*Game::pLocalPlayer)->fields.IsDead && ImGui::Button("Revive Yourself"))
+				static int framesPassed = -1;
+				static bool isReviving = false;
+
+				if (IsHost() && IsInGame() && !isReviving && GetPlayerData(*Game::pLocalPlayer)->fields.IsDead && ImGui::Button("Revive Yourself"))
 				{
-					if (PlayerIsImpostor(GetPlayerData(*Game::pLocalPlayer))) {
-						if (IsInGame()) State.rpcQueue.push(new RpcSetRole(*Game::pLocalPlayer, RoleTypes__Enum::Impostor));
-						if (IsInLobby()) State.lobbyRpcQueue.push(new RpcSetRole(*Game::pLocalPlayer, RoleTypes__Enum::Impostor));
+					app::NetworkedPlayerInfo_PlayerOutfit* outfit = GetPlayerOutfit(GetPlayerData(*Game::pLocalPlayer));
+					State.rpcQueue.push(new RpcRevive(*Game::pLocalPlayer));
+					State.rpcQueue.push(new RpcForceColor(*Game::pLocalPlayer, outfit->fields.ColorId));
+					framesPassed = 100;
+					switch (State.mapType) {
+					case Settings::MapType::Ship:
+						State.rpcQueue.push(new RpcSnapTo({ 9.3840f, -6.0744f }));
+						break;
+					case Settings::MapType::Hq:
+						State.rpcQueue.push(new RpcSnapTo({ 23.7700f, -1.5764f }));
+						break;
+					case Settings::MapType::Pb:
+						State.rpcQueue.push(new RpcSnapTo({ 6.9000f, -14.0464f }));
+						break;
+					case Settings::MapType::Airship:
+						State.rpcQueue.push(new RpcSnapTo({ -22.0990f, -1.1484f }));
+						break;
+					case Settings::MapType::Fungle:
+						State.rpcQueue.push(new RpcSnapTo({ -15.3590f, -9.4194f }));
+						break;
 					}
-					else {
-						if (IsInGame()) State.rpcQueue.push(new RpcSetRole(*Game::pLocalPlayer, RoleTypes__Enum::Crewmate));
-						if (IsInLobby()) State.lobbyRpcQueue.push(new RpcSetRole(*Game::pLocalPlayer, RoleTypes__Enum::Crewmate));
-					}
+					isReviving = true;
 				}
+
+				if (isReviving && framesPassed == 50)
+				{
+					State.rpcQueue.push(new RpcVent(*Game::pLocalPlayer, 1, false));
+					framesPassed--;
+				}
+				else if (isReviving && framesPassed <= 0 && (*Game::pLocalPlayer)->fields.inVent) {
+					State.rpcQueue.push(new RpcVent(*Game::pLocalPlayer, 1, true)); //for showing you as alive to ALL players
+					framesPassed = -1;
+					isReviving = false;
+				}
+				else if (isReviving) framesPassed--;
+
+				ImGui::EndChild();
 			}
 
 			if (openSettings) {
